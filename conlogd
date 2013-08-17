@@ -1,0 +1,360 @@
+#!/bin/bash
+############################################################
+#    Console Server and Logger for IPMI and KVM based on tmux
+#    Copyright (C) 2013  Alex Owen <r.alex.owen@gmail.com>
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License along
+#    with this program; if not, write to the Free Software Foundation, Inc.,
+#    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+############################################################
+
+#Default Variables
+[ -d /etc/conlogd-conf.d ] && PASSWDD=/etc/conlogd-conf.d
+[ -d ~/conlogd-conf.d ] && PASSWDD=~/conlogd-conf.d
+[ -z "$PASSWDD" ] &&  PASSWDD=~/conlogd-conf.d
+
+CONLOGDSOCKET=/tmp/conlogd-socket
+GROUP=staff
+#Default vars restartsol
+NORMALRESTARTPAUSE=4
+MINELAPSED=20
+GOODRUNTIME=$(( 12 * 60 * 60 )) # 12 hours
+
+#load system config
+[ -r /etc/conlogd.conf ] && . /etc/conlogd.conf
+#load user config
+[ -r ~/.conlogd.conf ] && . ~/.conlogd.conf
+
+#Derivative variables
+TMUX="tmux -S $CONLOGDSOCKET"
+
+#Functions
+getip(){ #$1=hostname
+if host $1 >/dev/null 2>&1 ; then 
+	echo 192.168.$(host $1 | sed -e's/.*has address [1-9]*\.[1-9]*\.//')
+else
+	return 1
+fi
+}
+
+
+do_stop(){ 
+$TMUX kill-server 
+}
+
+do_status(){ 
+$TMUX list-session 
+}
+
+
+start_session(){ #$1=HOST
+  HOST="$1"
+  if getip $HOST >/dev/null ; then 
+    $TMUX new-session -d -s IPMI-$HOST -n $HOST "$0 --internal-restartsol ${HOST} $(getip $HOST)"
+    $TMUX set-option  status-left-length 18 >/dev/null 2>&1 
+    $TMUX unbind-key c
+    $TMUX unbind-key :
+    $TMUX pipe-pane  "exec logger -t IPMID-$HOST "
+    $TMUX new-window -n $HOST-menu "$0 --internal-menu ${HOST} $(getip $HOST)"
+    $TMUX previous-window
+  fi
+}
+
+
+do_start(){
+for HOSTU in $( ls -1 $PASSWDD/*.U ); do 
+    HOST=$(basename $HOSTU .U)
+    start_session "$HOST"
+done
+}
+
+
+
+do_reload_kill_extra(){
+#Kill old sessions
+for HOST in $($TMUX list-session |sed -n -e's/IPMI-\(.*\):.*windows.*/\1/p') ; do 
+	[ -f $PASSWDD/$HOST.U ]|| $TMUX kill-session -t IPMI-$HOST 
+done
+}
+
+do_reload_start_missing(){
+#Start new sessions
+for HOSTU in $( ls -1 $PASSWDD/*.U ); do 
+    HOST=$(basename $HOSTU .U)
+    if ( $TMUX has-session -t IPMI-$HOST 1>/dev/null 2>&1 ) ; then
+	:
+    else 
+	start_session "$HOST"
+    fi
+done
+}
+
+do_reload_auto(){
+do_reload_kill_extra
+do_reload_start_missing
+}
+
+do_reload(){ #$1=HOST
+HOST="$1"
+$TMUX kill-session -t IPMI-$HOST
+do_reload_start_missing
+}
+
+log(){
+	date -Is
+	echo "$(basename $0): $@"
+	logger -t $(basename $0) "$@"
+}
+
+p_status () {
+log "Getting Power Status for $HOST"
+ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis power status
+}
+
+p_on () {
+log "Setting Power Status for $HOST to ON"
+ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis power on
+}
+
+p_soft () {
+log "Setting Power Status for $HOST to OFF(soft)"
+ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis power soft
+}
+
+p_hard () {
+log "Setting Power Status for $HOST to OFF(hard)"
+ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis power off
+}
+
+b_pxe () {
+log "Setting Next Boot of $HOST to PXE Boot"
+ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis bootdev pxe
+}
+b_disk () {
+log "Setting Next Boot of $HOST to Disk Boot"
+ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis bootdev disk
+}
+b_bios () {
+log "Setting Next Boot of $HOST to BIOS Setup"
+ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis bootdev bios
+}
+
+bmc_warm(){
+log "Warm Reset of BMC on $HOST"
+ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP mc reset warm
+}
+
+bmc_cold(){
+log "Cold Reset of BMC on $HOST"
+ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP mc reset cold
+}
+
+t_reset(){
+reset
+}
+
+
+
+conlogdmenu(){
+HOST=$1
+IP=$2
+
+trap ":" SIGINT
+
+reset #Clear screen and reset terminal
+while :
+do
+echo 
+echo "------------------------------------------------------------"
+echo " $HOST IPMI/Power Menu        NB: ^B-p to return to SOL"
+echo "------------------------------------------------------------"
+#### "    5    |    5    |    5    |    5    |    5    |    5    |"
+echo "1. Power Status              6. Next Boot -> Network"
+echo "2. Power On                  7. Next Boot -> Disk"
+echo "3. Power Off (soft)          8. Next Boot -> BIOS Setup"
+echo "4. FORCE Power Off           9. Reset BMC (Warm)echo "
+echo "5. Reset Terminal           10. Reset BMC (Cold)" 
+echo "------------------------------------------------------------"
+echo -n "Your choice? : "
+read choice
+echo
+echo
+case $choice in
+1) p_status ;;
+2) p_on ;;
+3) p_soft ;;
+4) p_hard ;;
+5) t_reset ;;
+6) b_pxe ;;
+7) b_disk ;;
+8) b_bios ;;
+9) bmc_warm ;;
+10) bmc_cold ;;
+*) echo "\"$choice\" is not valid" ; sleep 2 ;;
+esac
+echo
+done
+}
+
+
+
+
+
+conlogdrestartsol(){
+
+HOST=$1
+if [ -z "$2" ]; then 
+	log "PROBLEM STARTING AS NO IP ADDRESS GIVEN"
+	exit 1
+fi
+IP=$2
+
+
+# trap keyboard interrupt (control-c) and do nothing!
+trap ":" SIGINT 
+
+i=0
+while true ; do	
+	ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP sol deactivate
+	sleep 1
+	reset
+	log "Starting ipmi console on $HOST"
+	STARTTIME=$SECONDS
+	ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP sol activate
+	EXITCODE=$?
+	ENDTIME=$SECONDS
+	i=$(( $i + 1 ))
+
+	if [ $EXITCODE  -eq 0 ] ; then
+		#normal exit so restart after a brief pause
+		log "Normal Restart"
+		i=0
+		sleep $NORMALRESTARTPAUSE 
+		continue	
+	fi
+	#If we get here then we had an error exit code.
+	elapsed=$(( $ENDTIME - $STARTTIME  ))
+
+	if [ $elapsed -gt $GOODRUNTIME ] ; then
+		#ignore the error and restart
+		log "Good Restart"
+		i=0
+                sleep $NORMALRESTARTPAUSE
+                continue
+	fi
+	
+
+	if [ $i -lt 10 ] ; then
+		THISWAIT=20
+	elif [ $i -lt 70 ] ; then
+		# i is between 10 and 70
+		if [ $elapsed -lt $MINELAPSED ] ; then
+			log "We have a problem as runtime too short and already restarted 9 times (3mins)"
+			break
+        	fi
+		THISWAIT=60
+	else
+		log "Restarting over 70 times (1hour)...  so problem"
+		break
+	fi
+	log "Restart number $i in $THISWAIT seconds"
+	sleep $THISWAIT
+	continue
+done
+
+log "ERROR: terminating!"
+exit 1
+}
+
+###
+tmux_session_users(){ #$1=session
+session="$1"
+stat -c%U $($TMUX list-clients | sed -n "/"$session"/s/\:.*//p") 2>/dev/null
+}
+
+formatusers(){ #$1=extra_user
+( [ -n "$1" ]&& echo "$1" 
+tmux_session_users IPMI-$HOST) |sort -u | tr \\n  ' '
+}
+
+
+conlog(){
+host="$1"
+if ( $TMUX has-session -t "IPMI-$host" 1>/dev/null 2>&1 ) ; then 
+    logger -t conlog "ATTACH user=$USER to $host" 
+    $TMUX set-option -t IPMI-$HOST  status-right "$(formatusers $USER)" >/dev/null
+    $TMUX attach-session -t IPMI-$HOST
+    $TMUX set-option -t IPMI-$HOST  status-right "$(formatusers)" >/dev/null
+    logger -t conlog "DETACH user=$USER to $host" 
+else
+    echo
+    echo ERROR: no such session - IPMI-$host
+    echo
+    echo Available Sessions:
+    $TMUX list-sessions
+    echo
+    echo This program will terminate in 5 seconds
+    sleep 5
+    return 1
+fi
+}
+###
+
+
+#main()
+
+if [ "$(basename $0)" = "conlog" ] ; then
+    conlog "$@"
+    exit $?
+fi
+
+#Get us running as correct group
+group=$(id -gn)
+if [ "$group" != "$GROUP" ]; then
+ exec sg $GROUP -c "$0 $*"
+fi 
+
+case "$1" in 
+start)
+	do_start 
+	;;
+stop)
+	do_stop
+	;;
+restart)
+	do_stop
+	do_start
+	;;
+status)
+	do_status
+	;;
+reload)
+	if [ "$2" ] ; then 
+		do_reload "$2"
+	else
+		do_reload_auto
+	fi
+	;;
+--internal-menu)
+	conlogdmenu "$2" "$3"
+	;;
+--internal-restartsol)
+	conlogdrestartsol "$2" "$3"
+	;;
+*)
+	echo UNKNOWN ARGUMENT
+	exit 1
+	;;
+esac
+
+
