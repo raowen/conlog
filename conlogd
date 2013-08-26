@@ -17,12 +17,98 @@
 #    with this program; if not, write to the Free Software Foundation, Inc.,
 #    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 ############################################################
+# 2013-08-26 - Improved configuration 
+
+#Functions needed for loading config
+
+parse_uri() {
+#From IEFT STD66: URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+#Now here is a parser:
+
+uri="$@"
+#escape some dangerious characters
+uri="${uri//\`/%60}"
+uri="${uri//\"/%22}"
+
+#Parse the general syntax
+pattern='^([a-z][a-z0-9+\.-]*):([^?#]*)(\?[^#]*)?(#.*)?$'
+[[ "$uri" =~ $pattern ]] || return 1;
+URI_scheme=${BASH_REMATCH[1]}
+URI_hier_part=${BASH_REMATCH[2]}
+URI_query=${BASH_REMATCH[3]}
+URI_fragment=${BASH_REMATCH[4]}
+
+#Parse the hier-part
+pattern='(^//([^/]*))?(.*)'
+[[ "$URI_hier_part" =~ $pattern ]] || return 1;
+URI_authority=${BASH_REMATCH[2]}
+URI_path=${BASH_REMATCH[3]}
+
+unset URI_userinfo
+unset URI_host
+unset URI_port
+unset URI_username
+unset URI_password
+
+if [ -n "$URI_authority" ] ; then
+    #parse the authority
+    #pattern='((.*)@)?(.*)'
+    pattern='((.*)@)?([^:]*)(:([0-9]*))?'
+    [[ "$URI_authority" =~ $pattern ]] || return 1;
+    URI_userinfo=${BASH_REMATCH[2]}
+    URI_host=${BASH_REMATCH[3]}
+    URI_port=${BASH_REMATCH[5]}
+    if [ -n "$URI_userinfo" ] ; then
+        #parse the userinfo
+        pattern='([^:]*)(:(.*))?'
+        [[ "$URI_userinfo" =~ $pattern ]] || return 1;
+        URI_username=${BASH_REMATCH[1]}
+        URI_password=${BASH_REMATCH[3]}
+    fi
+fi
+}
+
+
+declare -A CL_hosts
+conlog(){ 
+#$1=hostname $2=URI
+CL_hosts[$1]=$2
+#parse config file into arrays
+}
+
+#for name in "${!CL_hosts[@]}" ; do echo $name ${CL_hosts[$name]} ; done
+
+########################
+###example config file
+########################
+## NB: This is a bash script fragment which is sourced.
+##     Take care when using what bash thinks are special characters!
+##
+## If you don't have DNS for ipmi clients but a formular/mapping from regular DNS 
+## then implememt a getip function for example:
+#genip(){ #$1=hostname
+#if host $1 >/dev/null 2>&1 ; then 
+#	echo 192.168.$(host $1 | sed -e's/.*has address [1-9]*\.[1-9]*\.//')
+#else
+#	return 1
+#fi
+#}
+## Now define hosts
+## IPMI host with generated/mapped IP 
+#conlog batman "ipmi://user:pass@$(genip batman)"
+## IPMI host with dns entry for bmc
+#conlog robin "ipmi://user:pass@robin.ipmi.my.net"
+## Local KVM host
+#conlog zoro  "qemu:///system"
+## Remote KVM host - conlog user needs ssh keys in place 
+#conlog test  "qemu+ssh://root@kvmhost.company.org/system"
+########################
+
+
 
 #Default Variables
-[ -d /etc/conlogd-conf.d ] && PASSWDD=/etc/conlogd-conf.d
-[ -d ~/conlogd-conf.d ] && PASSWDD=~/conlogd-conf.d
-[ -z "$PASSWDD" ] &&  PASSWDD=~/conlogd-conf.d
 
+ALT_CLIENT_NAME=ipmiconsole
 CONLOGDSOCKET=/tmp/conlogd-socket
 GROUP=staff
 #Default vars restartsol
@@ -40,6 +126,7 @@ TMUX="tmux -S $CONLOGDSOCKET"
 
 #Functions
 getip(){ #$1=hostname
+#extract IP from URL stored in CL_hosts
 if host $1 >/dev/null 2>&1 ; then 
 	echo 192.168.$(host $1 | sed -e's/.*has address [1-9]*\.[1-9]*\.//')
 else
@@ -60,11 +147,11 @@ $TMUX list-session
 start_session(){ #$1=HOST
   HOST="$1"
   if getip $HOST >/dev/null ; then 
-    $TMUX new-session -d -s IPMI-$HOST -n $HOST "$0 --internal-restartsol ${HOST} $(getip $HOST)"
+    $TMUX new-session -d -s \[$HOST\] -n $HOST "$0 --internal-restartsol ${HOST} $(getip $HOST)"
     $TMUX set-option  status-left-length 18 >/dev/null 2>&1 
     $TMUX unbind-key c
     $TMUX unbind-key :
-    $TMUX pipe-pane  "exec logger -t IPMID-$HOST "
+    $TMUX pipe-pane  "exec logger -t ConLog:$HOST "
     $TMUX new-window -n $HOST-menu "$0 --internal-menu ${HOST} $(getip $HOST)"
     $TMUX previous-window
   fi
@@ -72,8 +159,7 @@ start_session(){ #$1=HOST
 
 
 do_start(){
-for HOSTU in $( ls -1 $PASSWDD/*.U ); do 
-    HOST=$(basename $HOSTU .U)
+for HOST in "${!CL_hosts[@]}" ; do
     start_session "$HOST"
 done
 }
@@ -82,16 +168,15 @@ done
 
 do_reload_kill_extra(){
 #Kill old sessions
-for HOST in $($TMUX list-session |sed -n -e's/IPMI-\(.*\):.*windows.*/\1/p') ; do 
-	[ -f $PASSWDD/$HOST.U ]|| $TMUX kill-session -t IPMI-$HOST 
+for HOST in $($TMUX list-session |sed -ne's%\[\([^]]*\).*%\1%p') ; do 
+    [ ${CL_hosts[$HOST]} ] || $TMUX kill-session -t \[$HOST\] 
 done
 }
 
 do_reload_start_missing(){
 #Start new sessions
-for HOSTU in $( ls -1 $PASSWDD/*.U ); do 
-    HOST=$(basename $HOSTU .U)
-    if ( $TMUX has-session -t IPMI-$HOST 1>/dev/null 2>&1 ) ; then
+for HOST in "${!CL_hosts[@]}" ; do
+    if ( $TMUX has-session -t \[$HOST\] 1>/dev/null 2>&1 ) ; then
 	:
     else 
 	start_session "$HOST"
@@ -106,7 +191,7 @@ do_reload_start_missing
 
 do_reload(){ #$1=HOST
 HOST="$1"
-$TMUX kill-session -t IPMI-$HOST
+$TMUX kill-session -t \[$HOST\]
 do_reload_start_missing
 }
 
@@ -118,45 +203,45 @@ log(){
 
 p_status () {
 log "Getting Power Status for $HOST"
-ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis power status
+echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power status
 }
 
 p_on () {
 log "Setting Power Status for $HOST to ON"
-ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis power on
+echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power on
 }
 
 p_soft () {
 log "Setting Power Status for $HOST to OFF(soft)"
-ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis power soft
+echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power soft
 }
 
 p_hard () {
 log "Setting Power Status for $HOST to OFF(hard)"
-ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis power off
+echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power off
 }
 
 b_pxe () {
 log "Setting Next Boot of $HOST to PXE Boot"
-ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis bootdev pxe
+echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev pxe
 }
 b_disk () {
 log "Setting Next Boot of $HOST to Disk Boot"
-ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis bootdev disk
+echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev disk
 }
 b_bios () {
 log "Setting Next Boot of $HOST to BIOS Setup"
-ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP chassis bootdev bios
+echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev bios
 }
 
 bmc_warm(){
 log "Warm Reset of BMC on $HOST"
-ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP mc reset warm
+echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP mc reset warm
 }
 
 bmc_cold(){
 log "Cold Reset of BMC on $HOST"
-ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP mc reset cold
+echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP mc reset cold
 }
 
 t_reset(){
@@ -225,51 +310,51 @@ trap ":" SIGINT
 
 i=0
 while true ; do	
-	ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP sol deactivate
-	sleep 1
-	reset
-	log "Starting ipmi console on $HOST"
-	STARTTIME=$SECONDS
-	ipmitool -f $PASSWDD/$HOST -I lanplus -U $(cat $PASSWDD/$HOST.U) -H $IP sol activate
-	EXITCODE=$?
-	ENDTIME=$SECONDS
-	i=$(( $i + 1 ))
-
-	if [ $EXITCODE  -eq 0 ] ; then
-		#normal exit so restart after a brief pause
-		log "Normal Restart"
-		i=0
-		sleep $NORMALRESTARTPAUSE 
-		continue	
-	fi
-	#If we get here then we had an error exit code.
-	elapsed=$(( $ENDTIME - $STARTTIME  ))
-
-	if [ $elapsed -gt $GOODRUNTIME ] ; then
-		#ignore the error and restart
-		log "Good Restart"
-		i=0
-                sleep $NORMALRESTARTPAUSE
-                continue
-	fi
-	
-
-	if [ $i -lt 10 ] ; then
-		THISWAIT=20
-	elif [ $i -lt 70 ] ; then
-		# i is between 10 and 70
-		if [ $elapsed -lt $MINELAPSED ] ; then
-			log "We have a problem as runtime too short and already restarted 9 times (3mins)"
-			break
-        	fi
-		THISWAIT=60
-	else
-		log "Restarting over 70 times (1hour)...  so problem"
-		break
-	fi
-	log "Restart number $i in $THISWAIT seconds"
-	sleep $THISWAIT
-	continue
+    echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP sol deactivate
+    sleep 1
+    reset
+    log "Starting ipmi console on $HOST"
+    STARTTIME=$SECONDS
+    echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP sol activate
+    EXITCODE=$?
+    ENDTIME=$SECONDS
+    i=$(( $i + 1 ))
+    
+    if [ $EXITCODE  -eq 0 ] ; then
+	#normal exit so restart after a brief pause
+	log "Normal Restart"
+	i=0
+	sleep $NORMALRESTARTPAUSE 
+	continue	
+    fi
+    #If we get here then we had an error exit code.
+    elapsed=$(( $ENDTIME - $STARTTIME  ))
+    
+    if [ $elapsed -gt $GOODRUNTIME ] ; then
+	#ignore the error and restart
+	log "Good Restart"
+	i=0
+        sleep $NORMALRESTARTPAUSE
+        continue
+    fi
+    
+    
+    if [ $i -lt 10 ] ; then
+	THISWAIT=20
+    elif [ $i -lt 70 ] ; then
+	# i is between 10 and 70
+	if [ $elapsed -lt $MINELAPSED ] ; then
+	    log "We have a problem as runtime too short and already restarted 9 times (3mins)"
+	    break
+        fi
+	THISWAIT=60
+    else
+	log "Restarting over 70 times (1hour)...  so problem"
+	break
+    fi
+    log "Restart number $i in $THISWAIT seconds"
+    sleep $THISWAIT
+    continue
 done
 
 log "ERROR: terminating!"
@@ -277,28 +362,33 @@ exit 1
 }
 
 ###
-tmux_session_users(){ #$1=session
-session="$1"
-stat -c%U $($TMUX list-clients | sed -n "/"$session"/s/\:.*//p") 2>/dev/null
+tmux_session_users(){ #$1=host
+session="\[$1\]"
+stat -c%U $($TMUX list-clients | sed -n "/${session}/s/\:.*//p") 2>/dev/null
 }
 
 formatusers(){ #$1=extra_user
 ( [ -n "$1" ]&& echo "$1" 
-tmux_session_users IPMI-$HOST) |sort -u | tr \\n  ' '
+tmux_session_users "$host" ) |sort -u | tr \\n  ' '
 }
 
 
-conlog(){
+console-client-exit(){ #$1=host"
+    host="$1"
+    $TMUX set-option -t \[$host\]  status-right "$(formatusers)" >/dev/null
+    logger -t conlog "DETACH user=$USER from $host" 
+}
+
+console-client(){
 host="$1"
-if ( $TMUX has-session -t "IPMI-$host" 1>/dev/null 2>&1 ) ; then 
+if ( $TMUX has-session -t "\[$host\]" 1>/dev/null 2>&1 ) ; then 
     logger -t conlog "ATTACH user=$USER to $host" 
-    $TMUX set-option -t IPMI-$HOST  status-right "$(formatusers $USER)" >/dev/null
-    $TMUX attach-session -t IPMI-$HOST
-    $TMUX set-option -t IPMI-$HOST  status-right "$(formatusers)" >/dev/null
-    logger -t conlog "DETACH user=$USER to $host" 
+    $TMUX set-option -t \[$host\]  status-right "$(formatusers $USER)" >/dev/null
+    trap "console-client-exit $host" EXIT
+    $TMUX attach-session -t \[$host\]
 else
     echo
-    echo ERROR: no such session - IPMI-$host
+    echo ERROR: no such session - \[$host\]
     echo
     echo Available Sessions:
     $TMUX list-sessions
@@ -313,8 +403,8 @@ fi
 
 #main()
 
-if [ "$(basename $0)" = "conlog" ] ; then
-    conlog "$@"
+if [ "$(basename $0)" = "conlog" -o  "$(basename $0)" = "$ALT_CLIENT_NAME" ] ; then
+    console-client "$@"
     exit $?
 fi
 
