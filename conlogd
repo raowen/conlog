@@ -155,7 +155,7 @@ $TMUX list-session
 
 
 start_session(){ #$1=HOST
-  HOST="$1"
+    HOST="$1"
     $TMUX new-session -d -s \[$HOST\] -n $HOST "$0 --internal-restartsol ${HOST} $CL_host[$HOST]"
     $TMUX set-option  status-left-length 18 >/dev/null 2>&1 
     $TMUX unbind-key c
@@ -163,7 +163,6 @@ start_session(){ #$1=HOST
     $TMUX pipe-pane  "exec logger -t ConLog:$HOST "
     $TMUX new-window -n $HOST-menu "$0 --internal-menu ${HOST} $CL_host[$HOST]"
     $TMUX previous-window
-  fi
 }
 
 
