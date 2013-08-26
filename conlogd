@@ -156,12 +156,12 @@ $TMUX list-session
 
 start_session(){ #$1=HOST
     HOST="$1"
-    $TMUX new-session -d -s \[$HOST\] -n $HOST "$0 --internal-restartsol ${HOST} $CL_host[$HOST]"
+    $TMUX new-session -d -s \[$HOST\] -n $HOST "$0 --internal-restartsol ${HOST} ${CL_host[$HOST]}"
     $TMUX set-option  status-left-length 18 >/dev/null 2>&1 
     $TMUX unbind-key c
     $TMUX unbind-key :
     $TMUX pipe-pane  "exec logger -t ConLog:$HOST "
-    $TMUX new-window -n $HOST-menu "$0 --internal-menu ${HOST} $CL_host[$HOST]"
+    $TMUX new-window -n $HOST-menu "$0 --internal-menu ${HOST} ${CL_host[$HOST]}"
     $TMUX previous-window
 }
 
@@ -211,45 +211,45 @@ log(){
 
 p_status () {
 log "Getting Power Status for $HOST"
-echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power status
+ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power status
 }
 
 p_on () {
 log "Setting Power Status for $HOST to ON"
-echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power on
+ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power on
 }
 
 p_soft () {
 log "Setting Power Status for $HOST to OFF(soft)"
-echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power soft
+ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power soft
 }
 
 p_hard () {
 log "Setting Power Status for $HOST to OFF(hard)"
-echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power off
+ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power off
 }
 
 b_pxe () {
 log "Setting Next Boot of $HOST to PXE Boot"
-echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev pxe
+ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev pxe
 }
 b_disk () {
 log "Setting Next Boot of $HOST to Disk Boot"
-echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev disk
+ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev disk
 }
 b_bios () {
 log "Setting Next Boot of $HOST to BIOS Setup"
-echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev bios
+ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev bios
 }
 
 bmc_warm(){
 log "Warm Reset of BMC on $HOST"
-echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP mc reset warm
+ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP mc reset warm
 }
 
 bmc_cold(){
 log "Cold Reset of BMC on $HOST"
-echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP mc reset cold
+ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP mc reset cold
 }
 
 t_reset(){
@@ -318,12 +318,12 @@ trap ":" SIGINT
 
 i=0
 while true ; do	
-    echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP sol deactivate
+    ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP sol deactivate
     sleep 1
     reset
     log "Starting ipmi console on $HOST"
     STARTTIME=$SECONDS
-    echo ${CL_password[$HOST]} | ipmitool -f /dev/fd/0 -I lanplus -U ${CL_user[$HOST]} -H $IP sol activate
+    ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP sol activate
     EXITCODE=$?
     ENDTIME=$SECONDS
     i=$(( $i + 1 ))
