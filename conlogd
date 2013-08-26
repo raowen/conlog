@@ -69,14 +69,24 @@ fi
 }
 
 
-declare -A CL_hosts
+
+declare -A CL_type
+declare -A CL_host
+declare -A CL_password
+declare -A CL_user
+
 conlog(){ 
 #$1=hostname $2=URI
-CL_hosts[$1]=$2
+parse_uri "$2"
+CL_type[$1]=$URI_scheme
+CL_host[$1]=$URI_host
+CL_user[$1]=$URI_username
+CL_password[$1]=$URI_password
+
 #parse config file into arrays
 }
 
-#for name in "${!CL_hosts[@]}" ; do echo $name ${CL_hosts[$name]} ; done
+#for name in "${!CL_host[@]}" ; do echo $name ${CL_host[$name]} ; done
 
 ########################
 ###example config file
@@ -126,7 +136,7 @@ TMUX="tmux -S $CONLOGDSOCKET"
 
 #Functions
 getip(){ #$1=hostname
-#extract IP from URL stored in CL_hosts
+#extract IP from URL stored in CL_host
 if host $1 >/dev/null 2>&1 ; then 
 	echo 192.168.$(host $1 | sed -e's/.*has address [1-9]*\.[1-9]*\.//')
 else
@@ -146,20 +156,19 @@ $TMUX list-session
 
 start_session(){ #$1=HOST
   HOST="$1"
-  if getip $HOST >/dev/null ; then 
-    $TMUX new-session -d -s \[$HOST\] -n $HOST "$0 --internal-restartsol ${HOST} $(getip $HOST)"
+    $TMUX new-session -d -s \[$HOST\] -n $HOST "$0 --internal-restartsol ${HOST} $CL_host[$HOST]"
     $TMUX set-option  status-left-length 18 >/dev/null 2>&1 
     $TMUX unbind-key c
     $TMUX unbind-key :
     $TMUX pipe-pane  "exec logger -t ConLog:$HOST "
-    $TMUX new-window -n $HOST-menu "$0 --internal-menu ${HOST} $(getip $HOST)"
+    $TMUX new-window -n $HOST-menu "$0 --internal-menu ${HOST} $CL_host[$HOST]"
     $TMUX previous-window
   fi
 }
 
 
 do_start(){
-for HOST in "${!CL_hosts[@]}" ; do
+for HOST in "${!CL_host[@]}" ; do
     start_session "$HOST"
 done
 }
@@ -169,13 +178,13 @@ done
 do_reload_kill_extra(){
 #Kill old sessions
 for HOST in $($TMUX list-session |sed -ne's%\[\([^]]*\).*%\1%p') ; do 
-    [ ${CL_hosts[$HOST]} ] || $TMUX kill-session -t \[$HOST\] 
+    [ ${CL_host[$HOST]} ] || $TMUX kill-session -t \[$HOST\] 
 done
 }
 
 do_reload_start_missing(){
 #Start new sessions
-for HOST in "${!CL_hosts[@]}" ; do
+for HOST in "${!CL_host[@]}" ; do
     if ( $TMUX has-session -t \[$HOST\] 1>/dev/null 2>&1 ) ; then
 	:
     else 
