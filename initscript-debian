@@ -1,0 +1,186 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          conlogd
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: conlogd initscript
+# Description:       Control the conlogd psudo-daemon part of conlog:
+#		     git@github.com:raowen/conlog.git
+### END INIT INFO
+
+# Author: Alex Owen <r.alex.owen@gmail.com>
+# Debian init script
+#####
+#Howto setup as system service running as conlog user
+## Install pre-reqs
+#   $SUDO  apt-get install git tmux 
+## NB: bash 4 required for "declare -A"
+## Create conlog suer and group
+#   $SUDO adduser --system --group --disabled-login  --home /usr/local/share/conlog --gecos "ConLog User" conlog
+#   $SUDO passwd -l conlog
+## become conlog user
+#   sudo -sH -u conlog
+## as conlog user
+#   cd
+#   mkdir git
+#   cd git
+#   git clone git@github.com:raowen/conlog.git
+#   exit
+## back as root install in /usr/local/bin/
+#   cd /usr/local/bin/
+#   $SUDO cp ~conlog/git/conlog/conlogd ./
+#   $SUDO ln -s conlogd conlog
+## create config file:
+#   cp ~conlog/git/conlogexample-conlogd.conf /etc/conlogd.conf
+## edit /etc/conlogd.conf to local setup
+## Add users to conlog group
+#   $SUDO adduser user1 conlog
+#   $SUDO adduser user1 conlog
+## copy this init script to /etc/init.d/conlogd
+#   chmod 755 and
+## Link into boot process:
+#   update-rc.d conlogd defaults
+#####
+# Do NOT "set -e"
+
+# PATH should only include /usr/* if it runs after the mountnfs.sh script
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/local/bin
+DESC="Conlogd - conlog psudo-daemon"
+NAME=conlogd
+DAEMON=/usr/local/bin/$NAME
+DAEMON_ARGS=""
+PIDFILE=/var/run/$NAME.pid
+SCRIPTNAME=/etc/init.d/$NAME
+
+DAEMONUSER=conlog
+
+# Exit if the package is not installed
+[ -x "$DAEMON" ] || exit 0
+
+# Read configuration variable file if it is present
+[ -r /etc/default/$NAME ] && . /etc/default/$NAME
+
+# Load the VERBOSE setting and other rcS variables
+. /lib/init/vars.sh
+
+# Define LSB log_* functions.
+# Depend on lsb-base (>= 3.2-14) to ensure that this file is present
+# and status_of_proc is working.
+. /lib/lsb/init-functions
+
+VERBOSE=yes
+RUNASDAEMONUSER="su $DAEMONUSER -s /bin/bash -c "
+
+#
+# Function that starts the daemon/service
+#
+do_start()
+{
+	# Return
+	#   0 if daemon has been started
+	#   1 if daemon was already running
+	#   2 if daemon could not be started
+	$RUNASDAEMONUSER "$DAEMON status" >/dev/null 2>&1  && return 1
+	$RUNASDAEMONUSER "$DAEMON start" >/dev/null || return 2
+
+	# Add code here, if necessary, that waits for the process to be ready
+	# to handle requests from services started subsequently which depend
+	# on this one.  As a last resort, sleep for some time.
+}
+
+#
+# Function that stops the daemon/service
+#
+do_stop()
+{
+	# Return
+	#   0 if daemon has been stopped
+	#   1 if daemon was already stopped
+	#   2 if daemon could not be stopped
+	#   other if a failure occurred
+	$RUNASDAEMONUSER "$DAEMON status" >/dev/null 2>&1 || return 1
+	$RUNASDAEMONUSER "$DAEMON stop" >/dev/null || return 2
+}
+
+#
+# Function that sends a SIGHUP to the daemon/service
+#
+do_reload() {
+	# $1=host-to-reload
+	#
+	# If the daemon can reload its configuration without
+	# restarting (for example, when it is sent a SIGHUP),
+	# then implement that here.
+	#
+	$RUNASDAEMONUSER "$DAEMON reload $1" > /dev/null 	
+	return 0
+}
+
+do_status() {
+	$RUNASDAEMONUSER "$DAEMON status"  2>/dev/null && return 0
+	echo "$NAME not running" 
+}
+
+
+case "$1" in
+  start)
+	[ "$VERBOSE" != no ] && log_daemon_msg "Starting $DESC" "$NAME"
+	do_start
+	case "$?" in
+		0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
+		2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+	esac
+	;;
+  stop)
+	[ "$VERBOSE" != no ] && log_daemon_msg "Stopping $DESC" "$NAME"
+	do_stop
+	case "$?" in
+		0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
+		2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
+	esac
+	;;
+  status)
+	do_status 
+	#status_of_proc "$DAEMON" "$NAME" && exit 0 || exit $?
+	;;
+  reload|force-reload)
+	
+	# If do_reload() is not implemented then leave this commented out
+	# and leave 'force-reload' as an alias for 'restart'.
+	#
+	log_daemon_msg "Reloading $DESC" "$NAME"
+	do_reload $2
+	log_end_msg $?
+	;;
+  restart)
+	#
+	# If the "reload" option is implemented then remove the
+	# 'force-reload' alias
+	#
+	log_daemon_msg "Restarting $DESC" "$NAME"
+	do_stop
+	case "$?" in
+	  0|1)
+		do_start
+		case "$?" in
+			0) log_end_msg 0 ;;
+			1) log_end_msg 1 ;; # Old process is still running
+			*) log_end_msg 1 ;; # Failed to start
+		esac
+		;;
+	  *)
+		# Failed to stop
+		log_end_msg 1
+		;;
+	esac
+	;;
+  *)
+	#echo "Usage: $SCRIPTNAME {start|stop|restart|reload|force-reload}" >&2
+	echo "Usage: $SCRIPTNAME {start|stop|status|restart|reload|force-reload}" >&2
+	exit 3
+	;;
+esac
+
+:
