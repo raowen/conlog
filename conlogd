@@ -95,7 +95,7 @@ CL_password[$1]=$URI_password
 ##     Take care when using what bash thinks are special characters!
 ##
 ## If you don't have DNS for ipmi clients but a formular/mapping from regular DNS 
-## then implememt a getip function for example:
+## then implememt a genip function for example:
 #genip(){ #$1=hostname
 #if host $1 >/dev/null 2>&1 ; then 
 #	echo 192.168.$(host $1 | sed -e's/.*has address [1-9]*\.[1-9]*\.//')
@@ -135,15 +135,6 @@ GOODRUNTIME=$(( 12 * 60 * 60 )) # 12 hours
 TMUX="tmux -S $CONLOGDSOCKET"
 
 #Functions
-getip(){ #$1=hostname
-#extract IP from URL stored in CL_host
-if host $1 >/dev/null 2>&1 ; then 
-	echo 192.168.$(host $1 | sed -e's/.*has address [1-9]*\.[1-9]*\.//')
-else
-	return 1
-fi
-}
-
 
 do_stop(){ 
 $TMUX kill-server 
