@@ -22,6 +22,8 @@
 #Functions needed for loading config
 
 parse_uri() {
+local uri
+local pattern
 #From IEFT STD66: URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
 #Now here is a parser:
 
@@ -70,23 +72,70 @@ fi
 
 
 
-declare -A CL_type
-declare -A CL_host
-declare -A CL_password
-declare -A CL_user
 
-conlog(){ 
-#$1=hostname $2=URI
-parse_uri "$2"
-CL_type[$1]=$URI_scheme
-CL_host[$1]=$URI_host
-CL_user[$1]=$URI_username
-CL_password[$1]=$URI_password
+declare -a CL_session
+declare -a CL_uri
 
-#parse config file into arrays
+#Functions to use number indexed arrays as text keyed arrays
+#for bash3 compatability. Not generic as keyed on CL_session
+
+getindex(){ #$1=session
+    local session="$1" 
+    local i=0
+    while [ $i -lt ${#CL_session} ] ; do 
+	if [ "$session" = "${CL_session[$i]}" ]  ; then 
+	    echo $i
+	    return 0
+	else 
+	    i=$(( $i + 1 ))
+	fi
+    done
+return 1
 }
 
-#for name in "${!CL_host[@]}" ; do echo $name ${CL_host[$name]} ; done
+setarray(){ #$1=array $2=key $3=value
+    local array="$1"
+    local key="$2"
+    local value="$3"
+    if i=$(getindex "$key") ; then
+	#got index do nothing
+	:
+    else
+	#save new key in new index
+	i=${#CL_session[*]}
+	CL_session[$i]="$key"
+    fi
+    #protect the key array CL_session
+    if [ "$array"  != "CL_session" ] ; then 
+	eval "$array"[$i]="$value"
+    fi
+}
+
+getarray(){ #$1=array $2=key
+    local array="$1"
+    local key="$2"
+    i=$(getindex "$key")
+    eval echo \$\{$array[$i]\}
+}
+    
+
+
+conlog(){ #$1=session $2=URI
+setarray CL_session "$1"
+setarray CL_uri "$1" "$2"
+}
+
+parseconfig(){ #$1=session
+local session=$1
+local uri="$(getarray CL_uri $session)"
+CL_type=$URI_scheme
+#further assignments may in future debend on CL_type
+CL_host=$URI_host
+CL_user=$URI_username
+CL_password=$URI_password
+}
+
+#for session in ${CL_session[*]} ; do echo $session $(getarray CL_uri $session) ; done 
 
 ########################
 ###example config file
@@ -146,20 +195,22 @@ $TMUX list-session
 
 
 start_session(){ #$1=HOST
+    local session="$1"
     HOST="$1"
-    $TMUX new-session -d -s \[$HOST\] -n $HOST "$0 --internal-restartsol ${HOST} ${CL_host[$HOST]}"
+    $TMUX new-session -d -s \[${session}\] -n ${session}-console "$0 --internal-console ${session}"
     $TMUX set-option  status-left-length 18 >/dev/null 2>&1 
     $TMUX unbind-key c
     $TMUX unbind-key :
     $TMUX pipe-pane  "exec logger -t ConLog:$HOST "
-    $TMUX new-window -n $HOST-menu "$0 --internal-menu ${HOST} ${CL_host[$HOST]}"
+    $TMUX new-window -n ${session}-menu "$0 --internal-menu ${session}"
     $TMUX previous-window
 }
 
 
 do_start(){
-for HOST in "${!CL_host[@]}" ; do
-    start_session "$HOST"
+local session
+for session in ${CL_session[*]} ; do
+    start_session "$session"
 done
 }
 
@@ -167,18 +218,20 @@ done
 
 do_reload_kill_extra(){
 #Kill old sessions
-for HOST in $($TMUX list-session |sed -ne's%\[\([^]]*\).*%\1%p') ; do 
-    [ ${CL_host[$HOST]} ] || $TMUX kill-session -t \[$HOST\] 
+local session
+for session in $($TMUX list-session |sed -ne's%\[\([^]]*\).*%\1%p') ; do 
+    getindex "$session" >/dev/null || $TMUX kill-session -t \[$session\] 
 done
 }
 
 do_reload_start_missing(){
 #Start new sessions
-for HOST in "${!CL_host[@]}" ; do
-    if ( $TMUX has-session -t \[$HOST\] 1>/dev/null 2>&1 ) ; then
+local session
+for session in ${CL_session[*]} ; do
+    if ( $TMUX has-session -t \[$session\] 1>/dev/null 2>&1 ) ; then
 	:
     else 
-	start_session "$HOST"
+	start_session "$session"
     fi
 done
 }
@@ -189,8 +242,8 @@ do_reload_start_missing
 }
 
 do_reload(){ #$1=HOST
-HOST="$1"
-$TMUX kill-session -t \[$HOST\]
+local session="$1"
+$TMUX kill-session -t \[$session\]
 do_reload_start_missing
 }
 
@@ -201,46 +254,46 @@ log(){
 }
 
 p_status () {
-log "Getting Power Status for $HOST"
-ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power status
+log "Getting Power Status for $1"
+ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} chassis power status
 }
 
 p_on () {
-log "Setting Power Status for $HOST to ON"
-ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power on
+log "Setting Power Status for $1 to ON"
+ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} chassis power on
 }
 
 p_soft () {
-log "Setting Power Status for $HOST to OFF(soft)"
-ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power soft
+log "Setting Power Status for $1 to OFF(soft)"
+ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} chassis power soft
 }
 
 p_hard () {
-log "Setting Power Status for $HOST to OFF(hard)"
-ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis power off
+log "Setting Power Status for $1 to OFF(hard)"
+ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} chassis power off
 }
 
 b_pxe () {
-log "Setting Next Boot of $HOST to PXE Boot"
-ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev pxe
+log "Setting Next Boot of $1 to PXE Boot"
+ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} chassis bootdev pxe
 }
 b_disk () {
-log "Setting Next Boot of $HOST to Disk Boot"
-ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev disk
+log "Setting Next Boot of $1 to Disk Boot"
+ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} chassis bootdev disk
 }
 b_bios () {
-log "Setting Next Boot of $HOST to BIOS Setup"
-ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP chassis bootdev bios
+log "Setting Next Boot of $1 to BIOS Setup"
+ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} chassis bootdev bios
 }
 
 bmc_warm(){
-log "Warm Reset of BMC on $HOST"
-ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP mc reset warm
+log "Warm Reset of BMC on $1"
+ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} mc reset warm
 }
 
 bmc_cold(){
-log "Cold Reset of BMC on $HOST"
-ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP mc reset cold
+log "Cold Reset of BMC on $1"
+ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} mc reset cold
 }
 
 t_reset(){
@@ -250,8 +303,8 @@ reset
 
 
 conlogdmenu(){
-HOST=$1
-IP=$2
+local session="$1"
+parseconfig "$session"
 
 trap ":" SIGINT
 
@@ -274,47 +327,37 @@ read choice
 echo
 echo
 case $choice in
-1) p_status ;;
-2) p_on ;;
-3) p_soft ;;
-4) p_hard ;;
-5) t_reset ;;
-6) b_pxe ;;
-7) b_disk ;;
-8) b_bios ;;
-9) bmc_warm ;;
-10) bmc_cold ;;
+1) p_status "$session";;
+2) p_on "$session";;
+3) p_soft "$session";;
+4) p_hard "$session";;
+5) t_reset "$session";;
+6) b_pxe "$session";;
+7) b_disk "$session";;
+8) b_bios "$session";;
+9) bmc_warm "$session";;
+10) bmc_cold "$session";;
 *) echo "\"$choice\" is not valid" ; sleep 2 ;;
 esac
 echo
 done
 }
 
-
-
-
-
-conlogdrestartsol(){
-
-HOST=$1
-if [ -z "$2" ]; then 
-	log "PROBLEM STARTING AS NO IP ADDRESS GIVEN"
-	exit 1
-fi
-IP=$2
-
+conlogdconsole(){
+local session="$1"
+parseconfig "$session"
 
 # trap keyboard interrupt (control-c) and do nothing!
 trap ":" SIGINT 
 
 i=0
 while true ; do	
-    ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP sol deactivate
+    ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} sol deactivate
     sleep 1
     reset
     log "Starting ipmi console on $HOST"
     STARTTIME=$SECONDS
-    ipmitool -f  <(echo ${CL_password[$HOST]}) -I lanplus -U ${CL_user[$HOST]} -H $IP sol activate
+    ipmitool -f  <(echo ${CL_password}) -I lanplus -U ${CL_user} -H ${CL_host} sol activate
     EXITCODE=$?
     ENDTIME=$SECONDS
     i=$(( $i + 1 ))
@@ -435,10 +478,10 @@ reload)
 	fi
 	;;
 --internal-menu)
-	conlogdmenu "$2" "$3"
+	conlogdmenu "$2"
 	;;
---internal-restartsol)
-	conlogdrestartsol "$2" "$3"
+--internal-console)
+	conlogdconsole "$2"
 	;;
 *)
 	echo UNKNOWN ARGUMENT
