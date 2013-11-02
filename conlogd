@@ -128,6 +128,7 @@ setarray CL_uri "$1" "$2"
 parseconfig(){ #$1=session
 local session=$1
 local uri="$(getarray CL_uri $session)"
+parse_uri "$uri"
 CL_type=$URI_scheme
 #further assignments may in future debend on CL_type
 CL_host=$URI_host
@@ -194,14 +195,13 @@ $TMUX list-session
 }
 
 
-start_session(){ #$1=HOST
+start_session(){ #$1=session
     local session="$1"
-    HOST="$1"
     $TMUX new-session -d -s \[${session}\] -n ${session}-console "$0 --internal-console ${session}"
     $TMUX set-option  status-left-length 18 >/dev/null 2>&1 
     $TMUX unbind-key c
     $TMUX unbind-key :
-    $TMUX pipe-pane  "exec logger -t ConLog:$HOST "
+    $TMUX pipe-pane  "exec logger -t ConLog:$session "
     $TMUX new-window -n ${session}-menu "$0 --internal-menu ${session}"
     $TMUX previous-window
 }
@@ -241,7 +241,7 @@ do_reload_kill_extra
 do_reload_start_missing
 }
 
-do_reload(){ #$1=HOST
+do_reload(){ #$1=session
 local session="$1"
 $TMUX kill-session -t \[$session\]
 do_reload_start_missing
