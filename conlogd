@@ -212,12 +212,14 @@ $TMUX list-session
 
 start_session(){ #$1=session
     local session="$1"
-    $TMUX new-session -d -s \[${session}\] -n ${session}-console "$0 --internal-console ${session}"
+    local console_pid
+    $TMUX new-session -d -s \[${session}\] -n ${session}-console "exec $0 --internal-console ${session}"
+    console_pid=$($TMUX list-panes -t \[${session}\] -F "#{pane_pid}")
     $TMUX set-option  status-left-length 18 >/dev/null 2>&1 
     $TMUX unbind-key c
     $TMUX unbind-key :
     $TMUX pipe-pane  "exec logger -t ConLog:$session "
-    $TMUX new-window -n ${session}-menu "$0 --internal-menu ${session}"
+    $TMUX new-window -n ${session}-menu "exec $0 --internal-menu ${session} ${console_pid}"
     $TMUX previous-window
 }
 
@@ -319,6 +321,7 @@ reset
 
 conlogdmenu(){
 local session="$1"
+local console_pid="$2"
 parseconfig "$session"
 
 trap ":" SIGINT
@@ -359,11 +362,14 @@ done
 }
 
 conlogdconsole(){
+# trap keyboard interrupt (control-c) and do nothing!
+trap ":" SIGINT 
+trap "echo Trapped USR1" SIGUSR1
+trap "echo Trapped USR2" SIGUSR2
 local session="$1"
 parseconfig "$session"
 
-# trap keyboard interrupt (control-c) and do nothing!
-trap ":" SIGINT 
+#check CL_type and switch ipmi/kvm etc
 
 i=0
 while true ; do	
@@ -493,7 +499,7 @@ reload)
 	fi
 	;;
 --internal-menu)
-	conlogdmenu "$2"
+	conlogdmenu "$2" "$3"
 	;;
 --internal-console)
 	conlogdconsole "$2"
