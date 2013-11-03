@@ -21,11 +21,26 @@
 
 #Functions needed for loading config
 
+#set -e
+#set -x 
+
 parse_uri() {
-local uri
-local pattern
 #From IEFT STD66: URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
 #Now here is a parser:
+unset URI_scheme
+unset URI_hier_part
+unset URI_query
+unset URI_fragment
+unset URI_authority
+unset URI_path
+unset URI_userinfo
+unset URI_host
+unset URI_port
+unset URI_username
+unset URI_password
+
+local uri
+local pattern
 
 uri="$@"
 #escape some dangerious characters
@@ -46,11 +61,6 @@ pattern='(^//([^/]*))?(.*)'
 URI_authority=${BASH_REMATCH[2]}
 URI_path=${BASH_REMATCH[3]}
 
-unset URI_userinfo
-unset URI_host
-unset URI_port
-unset URI_username
-unset URI_password
 
 if [ -n "$URI_authority" ] ; then
     #parse the authority
@@ -72,7 +82,9 @@ fi
 
 
 
-
+unset CL_session
+unset CL_uri
+ 
 declare -a CL_session
 declare -a CL_uri
 
@@ -82,7 +94,7 @@ declare -a CL_uri
 getindex(){ #$1=session
     local session="$1" 
     local i=0
-    while [ $i -lt ${#CL_session} ] ; do 
+    while [ $i -lt ${#CL_session[*]} ] ; do 
 	if [ "$session" = "${CL_session[$i]}" ]  ; then 
 	    echo $i
 	    return 0
@@ -93,47 +105,50 @@ getindex(){ #$1=session
 return 1
 }
 
-setarray(){ #$1=array $2=key $3=value
-    local array="$1"
-    local key="$2"
-    local value="$3"
-    if i=$(getindex "$key") ; then
+seturi(){ #$1=session $2=uri
+    local session="$1"
+    local uri="$2"
+    local i
+    if i=$(getindex "$session") ; then
 	#got index do nothing
 	:
     else
 	#save new key in new index
 	i=${#CL_session[*]}
-	CL_session[$i]="$key"
+	CL_session[$i]="$session"
     fi
-    #protect the key array CL_session
-    if [ "$array"  != "CL_session" ] ; then 
-	eval "$array"[$i]="$value"
+    CL_uri[$i]="$uri"
+}
+
+geturi(){ #$1=session
+    local session="$1"
+    local i
+    if i=$(getindex "$session") ; then 
+	echo ${CL_uri[$i]}
+    else
+	return 1
     fi
 }
 
-getarray(){ #$1=array $2=key
-    local array="$1"
-    local key="$2"
-    i=$(getindex "$key")
-    eval echo \$\{$array[$i]\}
-}
-    
 
 
 conlog(){ #$1=session $2=URI
-setarray CL_session "$1"
-setarray CL_uri "$1" "$2"
+seturi "$1" "$2"
 }
 
 parseconfig(){ #$1=session
-local session=$1
-local uri="$(getarray CL_uri $session)"
-parse_uri "$uri"
-CL_type=$URI_scheme
-#further assignments may in future debend on CL_type
-CL_host=$URI_host
-CL_user=$URI_username
-CL_password=$URI_password
+local session="$1"
+local uri="$(geturi $session)"
+if parse_uri "$uri" ; then 
+    CL_type="$URI_scheme"
+    #further assignments may in future debend on CL_type
+    CL_host="$URI_host"
+    CL_user="$URI_username"
+    CL_password="$URI_password"
+else
+    exit 2
+fi
+
 }
 
 #for session in ${CL_session[*]} ; do echo $session $(getarray CL_uri $session) ; done 
@@ -209,7 +224,7 @@ start_session(){ #$1=session
 
 do_start(){
 local session
-for session in ${CL_session[*]} ; do
+for session in "${CL_session[@]}" ; do
     start_session "$session"
 done
 }
@@ -227,7 +242,7 @@ done
 do_reload_start_missing(){
 #Start new sessions
 local session
-for session in ${CL_session[*]} ; do
+for session in "${CL_session[@]}" ; do
     if ( $TMUX has-session -t \[$session\] 1>/dev/null 2>&1 ) ; then
 	:
     else 
@@ -405,7 +420,7 @@ exit 1
 
 ###
 tmux_session_users(){ #$1=host
-session="\[$1\]"
+local session="\[$1\]"
 stat -c%U $($TMUX list-clients | sed -n "/${session}/s/\:.*//p") 2>/dev/null
 }
 
@@ -416,13 +431,13 @@ tmux_session_users "$host" ) |sort -u | tr \\n  ' '
 
 
 console-client-exit(){ #$1=host"
-    host="$1"
+    local host="$1"
     $TMUX set-option -t \[$host\]  status-right "$(formatusers)" >/dev/null
     logger -t conlog "DETACH user=$USER from $host" 
 }
 
 console-client(){
-host="$1"
+local host="$1"
 if ( $TMUX has-session -t "\[$host\]" 1>/dev/null 2>&1 ) ; then 
     logger -t conlog "ATTACH user=$USER to $host" 
     $TMUX set-option -t \[$host\]  status-right "$(formatusers $USER)" >/dev/null
