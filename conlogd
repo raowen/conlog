@@ -213,14 +213,14 @@ $TMUX list-session
 start_session(){ #$1=session
     local session="$1"
     local console_pid
-    $TMUX new-session -d -s \[${session}\] -n ${session}-console "exec $0 --internal-console ${session}"
+    $TMUX -q new-session -d -s \[${session}\] -n ${session}-console "exec $0 --internal-console ${session}"
     console_pid=$($TMUX list-panes -t \[${session}\] -F "#{pane_pid}")
-    $TMUX set-option  status-left-length 18 >/dev/null 2>&1 
-    $TMUX unbind-key c
-    $TMUX unbind-key :
-    $TMUX pipe-pane  "exec logger -t ConLog:$session "
-    $TMUX new-window -n ${session}-menu "exec $0 --internal-menu ${session} ${console_pid}"
-    $TMUX previous-window
+    $TMUX set-option  status-left-length 18 \;\
+	unbind-key c \;\
+	unbind-key : \;\
+	pipe-pane  "exec logger -t ConLog:$session " \;\
+	new-window -n ${session}-menu "exec $0 --internal-menu ${session} ${console_pid}" \;\
+	previous-window
 }
 
 
