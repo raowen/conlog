@@ -1,0 +1,124 @@
+#!/bin/sh
+#
+# conlogd psudo-daemon part of conlog
+#
+# chkconfig:   345 20 80
+# description: Control the conlogd psudo-daemon part of conlog: \
+#              git@github.com:raowen/conlog.git
+
+### BEGIN INIT INFO
+# Provides: 		conlogd
+# Required-Start: 	$remote_fs $syslog
+# Required-Stop: 	$remote_fs $syslog
+# Should-Start: 
+# Should-Stop: 
+# Default-Start:	3 4 5 
+# Default-Stop: 	0 1 2 6
+# Short-Description: 	conlogd initscript
+# Description:      	Control the conlogd psudo-daemon part of conlog:
+#                    	git@github.com:raowen/conlog.git
+### END INIT INFO
+
+# Author: Alex Owen <r.alex.owen@gmail.com>
+# Fedora/Redhat/RPM init script
+#Template taken from https://fedoraproject.org/wiki/Packaging:SysVInitScript#Initscript_template
+#####
+#howto insall docs as a comment here to follow
+#####
+
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+exec="/usr/local/bin/conlogd"
+prog="conlogd"
+config="/etc/conlogd.conf"
+
+DAEMON=$exec
+DAEMONUSER=conlog
+RUNASDAEMONUSER="su $DAEMONUSER -s /bin/bash -c "
+
+[ -e /etc/sysconfig/$prog ] && . /etc/sysconfig/$prog
+
+lockfile=/var/lock/subsys/$prog
+
+start() {
+    [ -x $exec ] || exit 5
+    [ -f $config ] || exit 6
+    echo -n $"Starting $prog: "
+    # if not running, start it up here, usually something like "daemon $exec"
+    $RUNASDAEMONUSER "$DAEMON start" >/dev/null
+    retval=$?
+    echo
+    [ $retval -eq 0 ] && touch $lockfile
+    return $retval
+}
+
+stop() {
+    echo -n $"Stopping $prog: "
+    # stop it here, often "killproc $prog"
+    $RUNASDAEMONUSER "$DAEMON stop" >/dev/null
+    retval=$?
+    echo
+    [ $retval -eq 0 ] && rm -f $lockfile
+    return $retval
+}
+
+restart() {
+    stop
+    start
+}
+
+reload() {
+    #restart
+    $RUNASDAEMONUSER "$DAEMON reload $1" > /dev/null        
+    return 0
+}
+
+force_reload() {
+    restart
+}
+
+rh_status() {
+    # run checks to determine if the service is running or use generic status
+    ##status $prog
+    echo rh_status
+    $RUNASDAEMONUSER "$DAEMON status" >/dev/null 2>&1 
+}
+
+rh_status_q() {
+    echo rh_status_q
+    rh_status >/dev/null 2>&1
+}
+
+
+case "$1" in
+    start)
+        rh_status_q && exit 0
+        $1
+        ;;
+    stop)
+        rh_status_q || exit 0
+        $1
+        ;;
+    restart)
+        $1
+        ;;
+    reload|force-reload)
+        rh_status_q || exit 7
+        reload $2
+        ;;
+#    force-reload)
+#        force_reload
+#        ;;
+    status)
+        rh_status
+        ;;
+    condrestart|try-restart)
+        rh_status_q || exit 0
+        restart
+        ;;
+    *)
+        echo $"Usage: $0 {start|stop|status|restart|condrestart|try-restart|reload|force-reload}"
+        exit 2
+esac
+exit $?
