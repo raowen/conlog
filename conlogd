@@ -151,6 +151,14 @@ fi
 
 }
 
+getmembers(){
+    local IFS=","
+    g=$(getent group "$1")
+    for name in  ${g##*:} ; do
+        echo $name
+     done
+}
+
 #for session in ${CL_session[*]} ; do echo $session $(getarray CL_uri $session) ; done 
 
 ########################
@@ -221,6 +229,10 @@ start_session(){ #$1=session
 	pipe-pane  "exec logger -t ConLog:$session " \;\
 	new-window -n ${session}-menu "exec $0 --internal-menu ${session} ${console_pid}" \;\
 	previous-window
+    chmod 660 $CONLOGDSOCKET #For modern tmux
+    for member in $(getmembers $GROUP) ; do
+       $TMUX server-access -a $member
+    done
 }
 
 
