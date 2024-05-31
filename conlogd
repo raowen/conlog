@@ -373,6 +373,12 @@ echo
 done
 }
 
+pause4enter(){
+log "Automatic restart disabled. Fix problem and press ENTER to retry."
+read junk
+log "Retrying..."
+}
+
 conlogdconsole(){
 # trap keyboard interrupt (control-c) and do nothing!
 trap ":" SIGINT 
@@ -420,12 +426,12 @@ while true ; do
 	# i is between 10 and 70
 	if [ $elapsed -lt $MINELAPSED ] ; then
 	    log "We have a problem as runtime too short and already restarted 9 times (3mins)"
-	    break
+	    pause4enter ; i=0 ; continue
         fi
 	THISWAIT=60
     else
 	log "Restarting over 70 times (1hour)...  so problem"
-	break
+	pause4enter ; i=0 ; continue
     fi
     log "Restart number $i in $THISWAIT seconds"
     sleep $THISWAIT
